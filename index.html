@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>External Edge</title>
+    <style>
+        body{margin:0;overflow:hidden;}
+        #container{display:flex;width:100vw;height:100vh;}
+        #view1,#view2{width:50%;height:100%;}
+        #controls{position:absolute;top:10px;left:10px;display:flex;align-items:center;}
+        #controls>button{margin:0 5px;padding:5px 10px;font-size:16px;cursor:pointer;}
+        #hoverInfo{position:absolute;bottom:10px;left:10px;background-color:rgba(255,255,255,0.7);padding:10px;border-radius:5px;}
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="view1"></div>
+        <div id="view2"></div>
+    </div>
+    <div id="controls">
+        <button id="resetButton">Reset Cubes</button>
+        <button id="undoCubeButton">Undo Cube</button>
+        <button id="undoLineButton">Undo Line</button>
+    </div>
+    <div id="hoverInfo"></div>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const cubes = [];
+        const memory = [];
+        let cuboids = [];
+        let Guidelines = [];
+
+        // Cube class definition
+        class Cube {
+            constructor(x, y, z, size) {
+                const geometry = new THREE.BoxGeometry(size, size, size);
+                const materials = Array(6).fill().map(() => new THREE.MeshPhongMaterial({
+                    color: 0xC0C1CF,
+                    specular: 0xFFFFFF,
+                    shininess: 100,
+                    emissive: 0x330000,
+                    emissiveIntensity: 0.2,
+                    flatShading: false,
+                    polygonOffset: true,
+                    polygonOffsetFactor: 1,
+                    polygonOffsetUnits: 1
+                }));
+
+                this.mesh = new THREE.Mesh(geometry, materials);
+                this.mesh.position.set(x, y, z);
+                this.mesh.scale.set(1.001, 1.001, 1.001);
+                this.size = size;
+                this.normalColor = new THREE.Color(0xC0C1CF);
+            }
+
+            setVisible(visible) {
+                this.mesh.visible = visible;
+            }
+
+            get visible() {
+                return this.mesh.visible;
+            }
+
+            
+        }
+
+        // Function to create cuboids for a given face
+        function createCuboidsForFace(cube, faceIndex) {
+            const faceNormals = [
+                [1, 0, 0], [-1, 0, 0], [0, 1, 0],
+                [0, -1, 0], [0, 0, 1], [0, 0, -1]
+            ];
+
+            const normal = faceNormals[faceIndex];
+            const offset = cube.size / 2;
+            const cornerOffset = cube.size * 0.45;
+
+            const cornerPositions = [
+                [cornerOffset, cornerOffset],
+                [-cornerOffset, cornerOffset],
+                [-cornerOffset, -cornerOffset],
+                [cornerOffset, -cornerOffset]
+            ];
+            const thickness = 0.22;
+
+            // Define colors for cuboids
+            const cuboidColors = {
+                set1: {
+                    primary: 0x800080,   // Purple
+                    alternate: 0x008000  // Green
+                },
+                set2: {
+                    primary: 0x008000,   // Green
+                    alternate: 0xFFA500  // Orange
+                },
+                set3: {
+                    primary: 0xFFA500,   // Orange
+                    alternate: 0x800080  // Purple
+                }
+            };
+
+            for (let i = 0; i < 4; i++) {
+                let cuboidStart, cuboidEnd, cuboidSize;
+                if (normal[0] !== 0) {
+                    cuboidStart = new THREE.Vector3(normal[0] * offset, cornerPositions[i][1], cornerPositions[i][0]);
+                    cuboidEnd = new THREE.Vector3(normal[0] * offset, cornerPositions[(i + 1) % 4][1], cornerPositions[(i + 1) % 4][0]);
+                    cuboidSize = new THREE.Vector3(0.1, Math.abs(cornerPositions[i][1] - cornerPositions[(i + 1) % 4][1]) + thickness, Math.abs(cornerPositions[i][0] - cornerPositions[(i + 1) % 4][0]) + thickness);
+                } else if (normal[1] !== 0) {
+                    cuboidStart = new THREE.Vector3(cornerPositions[i][0], normal[1] * offset, cornerPositions[i][1]);
+                    cuboidEnd = new THREE.Vector3(cornerPositions[(i + 1) % 4][0], normal[1] * offset, cornerPositions[(i + 1) % 4][1]);
+                    cuboidSize = new THREE.Vector3(Math.abs(cornerPositions[i][0] - cornerPositions[(i + 1) % 4][0]) + thickness, 0.1, Math.abs(cornerPositions[i][1] - cornerPositions[(i + 1) % 4][1]) + thickness);
+                } else {
+                    cuboidStart = new THREE.Vector3(cornerPositions[i][0], cornerPositions[i][1], normal[2] * offset);
+                    cuboidEnd = new THREE.Vector3(cornerPositions[(i + 1) % 4][0], cornerPositions[(i + 1) % 4][1], normal[2] * offset);
+                    cuboidSize = new THREE.Vector3(Math.abs(cornerPositions[i][0] - cornerPositions[(i + 1) % 4][0]) + thickness, Math.abs(cornerPositions[i][1] - cornerPositions[(i + 1) % 4][1]) + thickness, 0.1);
+                }
+
+                // Determine the color based on the face index and cuboid index
+                let cuboidColor;
+                if (faceIndex === 2 || faceIndex === 3) {
+                    // Yellow (2) and Green (3) sides
+                    cuboidColor = i % 2 === 0 ? cuboidColors.set1.alternate : cuboidColors.set1.primary;
+                } else if (faceIndex === 4 || faceIndex === 5) {
+                    // Grey (4) and Brown (5) sides
+                    cuboidColor = i % 2 !== 0 ? cuboidColors.set2.alternate : cuboidColors.set2.primary;
+                } else {
+                    // Cyan (1) and Pink (0) sides
+                    cuboidColor = i % 2 === 0 ? cuboidColors.set3.alternate : cuboidColors.set3.primary;
+                }
+
+                const cuboidGeometry = new THREE.BoxGeometry(cuboidSize.x, cuboidSize.y, cuboidSize.z);
+                const cuboidMaterial = new THREE.MeshBasicMaterial({ color: cuboidColor });
+                const cuboid = new THREE.Mesh(cuboidGeometry, cuboidMaterial);
+                
+                const centerPosition = new THREE.Vector3().addVectors(cuboidStart, cuboidEnd).multiplyScalar(0.5);
+                cuboid.position.copy(centerPosition).add(cube.mesh.position);
+                
+                // Apply the cube group's rotation to the cuboid
+                cuboid.position.applyMatrix4(cubeGroup.matrix);
+                cuboid.rotation.copy(cubeGroup.rotation);
+                
+                // Add a property to store the original color
+                cuboid.userData.originalColor = new THREE.Color(cuboidColor);
+                
+                scene.add(cuboid);
+                cuboids.push(cuboid);
+            }
+        }
+
+        // Function to remove all cuboids
+        function removeCuboids() {
+            cuboids.forEach(cuboid => scene.remove(cuboid));
+            cuboids = [];
+        }
+
+        // Setup for View 1
+        const camera1 = new THREE.PerspectiveCamera(5, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
+        const renderer1 = new THREE.WebGLRenderer({ antialias: true });
+        renderer1.setSize(window.innerWidth / 2, window.innerHeight);
+        renderer1.setClearColor(0xFFFFFF);
+        document.getElementById('view1').appendChild(renderer1.domElement);
+
+        // Setup for View 2
+        const camera2 = new THREE.PerspectiveCamera(90, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
+        const renderer2 = new THREE.WebGLRenderer({ antialias: true });
+        renderer2.setSize(window.innerWidth / 2, window.innerHeight);
+        renderer2.setClearColor(0xFFFFFF);
+        document.getElementById('view2').appendChild(renderer2.domElement);
+
+        // Orbit controls for both views
+        const controls1 = new THREE.OrbitControls(camera1, renderer1.domElement);
+        controls1.enableDamping = true;
+        controls1.dampingFactor = 0.1;
+
+        const controls2 = new THREE.OrbitControls(camera2, renderer2.domElement);
+        controls2.enableDamping = true;
+        controls2.dampingFactor = 0.1;
+
+        // White plane
+        const planeGeometry = new THREE.PlaneGeometry(2200, 2200);
+        const planeMaterial = new THREE.MeshBasicMaterial({ color: 0xF5F5F5 });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+
+        // Create 6x6x6 grid of small cubes
+        const cubeSize = 2.5;
+        const gridSize = 6;
+        const totalSize = gridSize * cubeSize;
+
+        const cubeGroup = new THREE.Group();
+
+        for (let x = 0; x < gridSize; x++) {
+            for (let y = 0; y < gridSize; y++) {
+                for (let z = 0; z < gridSize; z++) {
+                    const cube = new Cube(
+                        x * cubeSize - totalSize / 2 + cubeSize / 2,
+                        y * cubeSize + cubeSize / 2,
+                        z * cubeSize - totalSize / 2 + cubeSize / 2,
+                        cubeSize
+                    );
+                    cubeGroup.add(cube.mesh);
+                    cubes.push(cube);
+                }
+            }
+        }
+
+        cubeGroup.position.set(0, 20, 20);
+        cubeGroup.rotation.set(0, Math.PI / 4, 0);
+        scene.add(cubeGroup);
+
+        // Lighting
+        const sidelight = new THREE.DirectionalLight(0xffffff, 5);
+        sidelight.position.set(1, 1, 0).normalize();
+        scene.add(sidelight);
+
+        const ambientLight = new THREE.AmbientLight(0x404040, 25);
+        scene.add(ambientLight);
+
+        // Camera positions
+        camera1.position.set(0, 310, 310);
+        camera1.lookAt(0, 20, 20);
+
+        camera2.position.set(0, 43, 43);
+        camera2.lookAt(0, 20, 20);
+
+        // Raycaster for cube selection and hover
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Click event to destroy cubes
+        function onMouseClick(event) {
+            const bounds = event.target.getBoundingClientRect();
+            mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+            mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+
+            const camera = (event.target === renderer1.domElement) ? camera1 : camera2;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cubes.map(cube => cube.mesh).filter(mesh => mesh.visible));
+
+            if (intersects.length > 0) {
+                const clickedCube = cubes.find(cube => cube.mesh === intersects[0].object);
+                clickedCube.setVisible(false);
+                memory.push(clickedCube);
+            }
+        }
+
+        // Hover event to highlight face
+        function onMouseMove(event) {
+            const bounds = event.target.getBoundingClientRect();
+            mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+            mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+
+            const camera = (event.target === renderer1.domElement) ? camera1 : camera2;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cubes.map(cube => cube.mesh).filter(mesh => mesh.visible));
+
+            removeCuboids();
+
+            if (intersects.length > 0) {
+                const hoveredCube = cubes.find(cube => cube.mesh === intersects[0].object);
+                createCuboidsForFace(hoveredCube, intersects[0].face.materialIndex);
+            }
+        }
+
+        // Right-click event to clone and extend cuboid
+        function onRightClick(event) {
+            event.preventDefault(); // Prevent the default context menu
+            const bounds = event.target.getBoundingClientRect();
+            mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+            mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+
+            const camera = (event.target === renderer1.domElement) ? camera1 : camera2;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cuboids);
+
+            if (intersects.length > 0) {
+                const clickedCuboid = intersects[0].object;
+                const cuboidColor = clickedCuboid.material.color.getHex();
+
+                const clonedCuboid = clickedCuboid.clone();
+                clonedCuboid.material = clickedCuboid.material.clone();
+                scene.add(clonedCuboid);
+                Guidelines.push(clonedCuboid);
+
+                // Determine extension direction based on color
+                let extensionAxis;
+                if (cuboidColor === 0x800080) { // Purple
+                    extensionAxis = 'z';
+                } else if (cuboidColor === 0xFFA500) { // Orange
+                    extensionAxis = 'y';
+                } else if (cuboidColor === 0x008000) { // Green
+                    extensionAxis = 'x';
+                }
+
+                // Extend the cloned cuboid
+                if (extensionAxis) {
+                    clonedCuboid.scale[extensionAxis] = 1000;
+                }
+            }
+        }
+
+        renderer1.domElement.addEventListener('click', onMouseClick);
+        renderer2.domElement.addEventListener('click', onMouseClick);
+        renderer1.domElement.addEventListener('mousemove', onMouseMove);
+        renderer2.domElement.addEventListener('mousemove', onMouseMove);
+        renderer1.domElement.addEventListener('contextmenu', onRightClick);
+        renderer2.domElement.addEventListener('contextmenu', onRightClick);
+
+        // Undo button functionality
+        document.getElementById('undoCubeButton').addEventListener('click', () => {
+            const lastDeletedCube = memory.pop();
+            if (lastDeletedCube) {
+                lastDeletedCube.setVisible(true);
+            }
+        });
+        // Undo Line button functionality
+        document.getElementById('undoLineButton').addEventListener('click', () => {
+            const lastGuideline = Guidelines.pop();
+            if (lastGuideline) {
+                scene.remove(lastGuideline);
+            }
+        });
+
+
+        // Reset button functionality
+        document.getElementById('resetButton').addEventListener('click', () => {
+            cubes.forEach(cube => {
+                cube.setVisible(true);
+            });
+            memory.length = 0;
+        });
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls1.update();
+            controls2.update();
+            renderer1.render(scene, camera1);
+            renderer2.render(scene, camera2);
+        }
+        animate();
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            const newWidth = window.innerWidth / 2;
+            const newHeight = window.innerHeight;
+
+            camera1.aspect = newWidth / newHeight;
+            camera1.updateProjectionMatrix();
+            renderer1.setSize(newWidth, newHeight);
+
+            camera2.aspect = newWidth / newHeight;
+            camera2.updateProjectionMatrix();
+            renderer2.setSize(newWidth, newHeight);
+        }, false);
+    </script>
+</body>
+</html>
