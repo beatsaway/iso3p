@@ -178,12 +178,7 @@
         controls2.enableDamping = true;
         controls2.dampingFactor = 0.1;
 
-        // White plane
-        const planeGeometry = new THREE.PlaneGeometry(2200, 2200);
-        const planeMaterial = new THREE.MeshBasicMaterial({ color: 0xF5F5F5 });
-        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-        plane.rotation.x = -Math.PI / 2;
-        scene.add(plane);
+        
 
         // Create 6x6x6 grid of small cubes
         const cubeSize = 2.5;
